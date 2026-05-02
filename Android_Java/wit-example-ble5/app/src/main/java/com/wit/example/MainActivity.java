@@ -4,16 +4,21 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanResult;
 import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ListView;
 import android.widget.Switch;
 import android.widget.Toast;
+
+import lecho.lib.hellocharts.model.Line;
+import lecho.lib.hellocharts.model.LineChartData;
+import lecho.lib.hellocharts.model.PointValue;
+import lecho.lib.hellocharts.model.Viewport;
+import lecho.lib.hellocharts.view.LineChartView;
 
 import com.wit.example.UI.CustomAdapter;
 import com.wit.example.UI.ListItem;
@@ -34,18 +39,36 @@ import java.util.TimerTask;
  * Example main interface, displaying search list and sensor data
  * */
 public class MainActivity extends AppCompatActivity implements DeviceDataListener, DeviceFindListener {
-    // region 属性字段 attribute field
-    // Wit日志 Wit logs
+
     private static final String TAG = "WitLOG";
 
-    // 找到的设备列表 List of devices found
     private final List<ListItem> findList = new ArrayList<>();
 
-    // 数据刷新定时器 Data Refresh Timer
     private Timer timer;
 
-    // 自定义ListView适配器 ListView adapter
     private CustomAdapter customAdapter;
+
+    private LineChartView lineChartViewAcc;
+    private LineChartView lineChartViewGyro;
+
+    private LineChartData lineChartDataAcc;
+    private LineChartData lineChartDataGyro;
+
+    private final List<PointValue> pointValuesAcc1 = new ArrayList<>();
+    private final List<PointValue> pointValuesAcc2 = new ArrayList<>();
+    private final List<PointValue> pointValuesAcc3 = new ArrayList<>();
+
+    private final List<PointValue> pointValuesGyro1 = new ArrayList<>();
+    private final List<PointValue> pointValuesGyro2 = new ArrayList<>();
+    private final List<PointValue> pointValuesGyro3 = new ArrayList<>();
+
+    private int pointIndexAcc1 = 0;
+    private int pointIndexAcc2 = 0;
+    private int pointIndexAcc3 = 0;
+
+    private int pointIndexGyro1 = 0;
+    private int pointIndexGyro2 = 0;
+    private int pointIndexGyro3 = 0;
 
     // 设备管理器 Device Manager
     private final DeviceManager deviceManager = DeviceManager.getInstance();
@@ -55,11 +78,8 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        // 申请蓝牙及定位权限 Apply for Bluetooth and location permissions
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         WitBluetoothManager.requestPermissions(this);
-
-        // 搜索开关 Search switch
         @SuppressLint("UseSwitchCompatOrMaterialCode")
         Switch swi = findViewById(R.id.switch1);
         swi.setOnCheckedChangeListener((buttonView, isChecked) -> {
@@ -70,28 +90,54 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
             }
         });
 
-        // 搜索列表 search list
         ListView listView = findViewById(R.id.scanlist);
         customAdapter = new CustomAdapter(this, findList);
         listView.setAdapter(customAdapter);
-        // 跳转设备配置 Jump device configuration
-        listView.setOnItemClickListener(new AdapterView.OnItemClickListener(){
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                ListItem clickedItem = (ListItem) parent.getItemAtPosition(position);
-                ShowDevice(clickedItem.getTitle());
-            }
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            ListItem clickedItem = (ListItem) parent.getItemAtPosition(position);
+            ShowDevice(clickedItem.getTitle());
         });
 
-        // 监听设备事件 Monitoring device events
         deviceManager.AddDeviceListener(this);
         deviceManager.AddDeviceFindListener(this);
+        initChart();
+    }
+
+    private void initChart() {
+
+        lineChartViewAcc = findViewById(R.id.line_chart_view_a);
+        lineChartViewGyro= findViewById(R.id.line_chart_view_g);
+
+        lineChartDataAcc = new LineChartData();
+        Line lineAcc1 = new Line(pointValuesAcc1).setColor(0xFF4081FF).setCubic(false);
+        Line lineAcc2 = new Line(pointValuesAcc2).setColor(0x40FF81FF).setCubic(false);
+        Line lineAcc3 = new Line(pointValuesAcc3).setColor(0xFF8140FF).setCubic(false);
+
+        lineChartDataGyro = new LineChartData();
+
+        Line lineGyro1 = new Line(pointValuesGyro1).setColor(0xFF4081FF).setCubic(false);
+        Line lineGyro2 = new Line(pointValuesGyro2).setColor(0x40FF81FF).setCubic(false);
+        Line lineGyro3 = new Line(pointValuesGyro3).setColor(0xFF8140FF).setCubic(false);
+
+        List<Line> linesGyro = new ArrayList<>();
+        linesGyro.add(lineGyro1);
+        linesGyro.add(lineGyro2);
+        linesGyro.add(lineGyro3);
+        lineChartDataGyro.setLines(linesGyro);
+        lineChartViewGyro.setLineChartData(lineChartDataGyro);
+
+        List<Line> linesAcc = new ArrayList<>();
+        linesAcc.add(lineAcc1);
+        linesAcc.add(lineAcc2);
+        linesAcc.add(lineAcc3);
+        lineChartDataAcc.setLines(linesAcc);
+        lineChartViewAcc.setLineChartData(lineChartDataAcc);
+
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // 取消定时任务 Cancel scheduled tasks
         if(timer!=null){
             timer.cancel();
             timer = null;
@@ -102,21 +148,15 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        // 取消定时任务 Cancel scheduled tasks
         if(timer!=null){
             timer.cancel();
             timer = null;
         }
 
-        // 取消订阅设备事件 Unsubscribe device event
         deviceManager.RemoveDeviceListener(this);
         deviceManager.RemoveDeviceFindListener(this);
     }
 
-    /**
-     * 更新主界面数据
-     * Update main interface data
-     * */
     private void startUpdate(){
         timer = new Timer();
         timer.scheduleAtFixedRate(new TimerTask() {
@@ -136,12 +176,7 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
         }, 1000, 100);
     }
 
-    /**
-     * 开始搜索蓝牙
-     * Start searching for Bluetooth
-     * */
     private void StartScan(){
-        // 清除现有设备 Clear existing devices
         findList.clear();
         ListView listView = findViewById(R.id.scanlist);
         CustomAdapter adapter = (CustomAdapter) listView.getAdapter();
@@ -156,10 +191,6 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
         }
     }
 
-    /**
-     * 结束搜索蓝牙
-     * End search for Bluetooth
-     * */
     private void StopScan(){
         try {
             WitBluetoothManager witBluetoothManager = WitBluetoothManager.getInstance(this);
@@ -169,10 +200,6 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
         }
     }
 
-    /**
-     * 进入设备界面
-     * Enter the device interface
-     * */
     private void ShowDevice(String deviceName){
         // 跳转数据页面
         Intent intent = new Intent(this, DeviceActivity.class);
@@ -216,13 +243,57 @@ public class MainActivity extends AppCompatActivity implements DeviceDataListene
         }
     }
 
-    /**
-     * 设备实时数据回调
-     * Real time data callback for devices
-     * */
+
     @Override
     public void OnReceive(String deviceName, String displayData) {
+        // Get the device model from the device manager and extract specific data (e.g. AngX) for plotting
+        DeviceModel deviceModel = deviceManager.GetDevice(deviceName);
+        if (deviceModel != null) {
+            float valueAcc1 = deviceModel.GetData("AccX").floatValue();
+            float valueAcc2 = deviceModel.GetData("AccY").floatValue();
+            float valueAcc3 = deviceModel.GetData("AccZ").floatValue();
+            runOnUiThread(() -> updateChartAcc(valueAcc1, valueAcc2, valueAcc3));
+            float valueGyro1 = deviceModel.GetData("AsX").floatValue();
+            float valueGyro2 = deviceModel.GetData("AsY").floatValue();
+            float valueGyro3 = deviceModel.GetData("AsZ").floatValue();
+            runOnUiThread(() -> updateChartGyro(valueGyro1, valueGyro2, valueGyro3));
+        }
+    }
 
+    private void updateChartAcc(float value1, float value2, float value3) {
+        pointValuesAcc1.add(new PointValue(pointIndexAcc1++, value1));
+        if (pointValuesAcc1.size() > 50) {
+            pointValuesAcc1.remove(0);
+        }
+
+        pointValuesAcc2.add(new PointValue(pointIndexAcc2++, value2));
+        if (pointValuesAcc2.size() > 50) {
+            pointValuesAcc2.remove(0);
+        }
+
+        pointValuesAcc3.add(new PointValue(pointIndexAcc3++, value3));
+        if (pointValuesAcc3.size() > 50) {
+            pointValuesAcc3.remove(0);
+        }
+        lineChartViewAcc.setLineChartData(lineChartDataAcc);
+    }
+
+    private void updateChartGyro(float value1, float value2, float value3) {
+        pointValuesGyro1.add(new PointValue(pointIndexGyro1++, value1));
+        if (pointValuesGyro1.size() > 50) {
+            pointValuesGyro1.remove(0);
+        }
+
+        pointValuesGyro2.add(new PointValue(pointIndexGyro2++, value2));
+        if (pointValuesGyro2.size() > 50) {
+            pointValuesGyro2.remove(0);
+        }
+
+        pointValuesGyro3.add(new PointValue(pointIndexGyro3++, value3));
+        if (pointValuesGyro3.size() > 50) {
+            pointValuesGyro3.remove(0);
+        }
+        lineChartViewGyro.setLineChartData(lineChartDataGyro);
     }
 
     /**
